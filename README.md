@@ -1,10 +1,65 @@
 # cnvs-whiteboard-skills
 
-Agent Skills for [cnvs.app](https://cnvs.app) — the free, no-signup real-time collaborative whiteboard with a live Model Context Protocol (MCP) endpoint.
+Agent Skills + MCP server discovery for [**cnvs.app**](https://cnvs.app) — the free, no-signup real-time collaborative whiteboard. Any AI agent can read, write, draw, diagram, and subscribe to live human edits on a shared canvas, either through the hosted MCP server or the REST fallback.
 
-Two related skills, published under the [agentskills.io](https://agentskills.io/specification) open standard so they work in any compatible runtime (Claude Code, Claude Desktop, OpenAI Codex / OpenCode, Cursor, Aider with MCP plugin, etc.).
+Works with Claude Code, Claude Desktop, Cursor, OpenCode / OpenAI Codex, Aider (with MCP plugin), any other MCP-speaking client, and Hermes-family agents.
 
-## Skills in this repo
+## MCP Server
+
+**Endpoint**: `https://cnvs.app/mcp` (Streamable HTTP, protocol `2025-06-18`, no auth — the board ID is the access key).
+
+**Registered in the official [MCP Registry](https://registry.modelcontextprotocol.io)** as [`app.cnvs/whiteboard`](https://registry.modelcontextprotocol.io/v0/servers?search=cnvs).
+
+### Capabilities
+
+- **Tools** (10): `open_board`, `get_board`, `get_preview`, `add_text`, `add_link`, `add_image`, `draw_stroke`, `move`, `erase`, `wait_for_update`. All ten have 1:1 REST mirrors at `https://cnvs.app/api/boards/<id>/…` for runtimes that can't speak MCP.
+- **Resources** (2): `cnvs://board/{id}/state.json` (full snapshot, subscribable) and `cnvs://board/{id}/preview.svg` (visual render, subscribable).
+- **Subscriptions**: `resources/subscribe` supported with `notifications/resources/updated` pushed over SSE, debounced ~3 s after activity settles.
+- **Live machine-readable manifests**: [`/quotas.json`](https://cnvs.app/quotas.json), [`/openapi.json`](https://cnvs.app/openapi.json), [`/llms.txt`](https://cnvs.app/llms.txt), [`/.well-known/mcp.json`](https://cnvs.app/.well-known/mcp.json), [`/.well-known/mcp/server.json`](https://cnvs.app/.well-known/mcp/server.json).
+
+## Installation
+
+### Claude Desktop / Cursor / any MCP client
+
+One-line config — add this to your client's `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "cnvs": {
+      "type": "http",
+      "url": "https://cnvs.app/mcp"
+    }
+  }
+}
+```
+
+### Claude Code CLI
+
+```bash
+claude mcp add --transport http cnvs https://cnvs.app/mcp
+```
+
+### REST-only (no MCP client)
+
+```bash
+# Create a board
+curl -X POST https://cnvs.app/api/boards
+
+# Add text
+curl -X POST https://cnvs.app/api/boards/<id>/texts \
+  -H 'Content-Type: application/json' \
+  -d '{"x":100,"y":200,"content":"# Hello","author":"ai:myagent"}'
+
+# Long-poll for live changes
+curl "https://cnvs.app/api/boards/<id>/wait?timeout_ms=25000"
+```
+
+Full REST reference: [`/llms.txt`](https://cnvs.app/llms.txt), [`/openapi.json`](https://cnvs.app/openapi.json).
+
+## Skills included
+
+Two related Agent Skills live in this repo, published under the [agentskills.io](https://agentskills.io/specification) open standard so they work in any compatible runtime. Install them into `~/.claude/skills/` to teach the agent how to use the MCP server well (preview-before-JSON, REST-over-MCP for writes, author-tag conventions, subscription-then-react loop).
 
 ### [`cnvs-whiteboard/`](./cnvs-whiteboard/SKILL.md) — PRIMARY
 
@@ -23,7 +78,7 @@ Push-to-model pump for **any** Streamable-HTTP MCP server with subscriptions. Op
 
 Not cnvs-specific. Works against file watchers, remote queues, task runners, anything exposing `resources/subscribe` over MCP. `cnvs-whiteboard` delegates its push channel here.
 
-## Install (Claude Code)
+### Install the skills
 
 ```bash
 # cnvs-whiteboard (SKILL.md only — no deps)
@@ -38,28 +93,11 @@ curl -O https://cnvs.app/mcp-listen/SKILL.md \
 npm install
 ```
 
-Alternatively clone this repo and `cp -r .claude/skills/* ~/.claude/skills/` — the `.claude/skills/` directory contains symlinks into `cnvs-whiteboard/` and `mcp-listen/` for Claude Code's expected layout.
-
-## Install (Claude Desktop / any MCP client)
-
-The MCP server is already published in the official [MCP Registry](https://registry.modelcontextprotocol.io) as `app.cnvs/whiteboard` — just add the remote:
-
-```json
-{
-  "mcpServers": {
-    "cnvs": {
-      "type": "http",
-      "url": "https://cnvs.app/mcp"
-    }
-  }
-}
-```
-
-The skills are optional documentation — the MCP server works on its own. The skills teach the agent *how* to use it well (preview-before-JSON, REST-over-MCP-for-writes, author-tag conventions, subscription-then-react loop).
+Alternatively `git clone` this repo and `cp -r .claude/skills/* ~/.claude/skills/` — the `.claude/skills/` directory contains symlinks into `cnvs-whiteboard/` and `mcp-listen/` for Claude Code's expected layout.
 
 ## Spec compliance
 
-Both skills follow [agentskills.io spec](https://agentskills.io/specification):
+Both skills follow the [agentskills.io spec](https://agentskills.io/specification):
 
 - `name` matches the containing directory name
 - `description` under 1024 characters, imperative phrasing, explicit trigger keywords
@@ -92,7 +130,8 @@ The cnvs.app URLs are the canonical install targets for curl-based installers; t
 - **cnvs.app `/.well-known/mcp.json`** — links both skills
 - **cnvs.app `/.well-known/mcp/server.json`** — MCP Registry entry with publisher-provided `_meta.skills[]`
 - **cnvs.app `/llms.txt`** — LLM-friendly full reference
-- **Community skill registries** — `daymade/claude-code-skills`, `majiayu000/claude-skill-registry` (submitted)
+- **Community skill registries** — [`daymade/claude-code-skills`](https://github.com/daymade/claude-code-skills), [`majiayu000/claude-skill-registry`](https://github.com/majiayu000/claude-skill-registry) (submitted)
+- **Lobehub** (used by Hermes agent) — both skills imported; MCP server submitted
 
 ## License
 
