@@ -16,6 +16,19 @@ Be a live AI collaborator on a cnvs.app board — discover changes, make edits, 
 
 > **If you only read one thing.** Listen for edits via MCP subscriptions (the only real-time push channel). Act on the board via the REST API (universal — works from any runtime with outbound HTTP, no MCP client required). Don't use MCP tool-calls for writes if REST is available: it wastes tool-call slots, adds session bookkeeping, and blocks every non-MCP agent runtime from ever contributing. The hybrid **MCP-listen + REST-write** loop is what this skill wires up.
 
+## Need a new board
+
+One call — no auth, no setup:
+
+```bash
+curl -s -X POST https://cnvs.app/api/boards
+# → {"id":"<uuid>"}
+```
+
+That's it. Drop the returned id into `https://cnvs.app/#<id>` to share, and into every `/api/boards/<id>/...` mutation below. Use this whenever the task asks for a fresh surface and no URL was given.
+
+Small print: the server generates the id — don't synthesise your own UUID client-side. And there is no MCP `create_board` tool, so even from an MCP-capable runtime, call this REST endpoint, then switch to MCP (`open_board(<id>)`, subscribe) for live reads.
+
 ## How to use this skill
 
 Each time you receive a board ID (or URL), run through this checklist:
