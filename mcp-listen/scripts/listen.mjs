@@ -20,6 +20,14 @@
 //                                 with this prefix. Repeatable. Common:
 //                                 --ignore-author-prefix "ai:" to mute
 //                                 every AI collaborator, not just yourself.
+//   --verbose                     Route diagnostic events (connected,
+//                                 subscribed, still_watching, error,
+//                                 filter_error) to stdout alongside the
+//                                 actionable resource_updated events.
+//                                 Default: only resource_updated reaches
+//                                 stdout; diagnostics go to stderr so a
+//                                 wrapping Monitor only fires on real
+//                                 updates and not on connection chatter.
 //
 // Filtering strategy: on each `resources/updated` we `resources/read` the
 // URI, parse the JSON, pick the item with the latest `last_updated` across
@@ -42,6 +50,7 @@ function parseArgs(argv) {
     const positional = [];
     const ignoreAuthors = [];
     const ignorePrefixes = [];
+    let verbose = false;
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === "--ignore-author") {
@@ -58,11 +67,13 @@ function parseArgs(argv) {
                 process.exit(1);
             }
             if (v !== "") ignorePrefixes.push(v);
+        } else if (a === "--verbose" || a === "-v") {
+            verbose = true;
         } else {
             positional.push(a);
         }
     }
-    return { ignoreAuthors, ignorePrefixes, positional };
+    return { ignoreAuthors, ignorePrefixes, verbose, positional };
 }
 
 function isIgnored(author) {
@@ -72,16 +83,28 @@ function isIgnored(author) {
     return false;
 }
 
-const { ignoreAuthors, ignorePrefixes, positional } = parseArgs(process.argv.slice(2));
+const { ignoreAuthors, ignorePrefixes, verbose, positional } = parseArgs(process.argv.slice(2));
 const [mcpUrl, ...uris] = positional;
 if (!mcpUrl || uris.length === 0) {
-    process.stderr.write("usage: listen.mjs [--ignore-author <tag>]... <mcp-url> <resource-uri> [uri ...]\n");
+    process.stderr.write("usage: listen.mjs [--ignore-author <tag>]... [--verbose] <mcp-url> <resource-uri> [uri ...]\n");
     process.exit(1);
 }
 
-function emit(event) {
-    // ONE line per event = ONE Monitor notification to the model.
+// Actionable events go to stdout — one line = one Monitor notification
+// to the model. Reserved for resource_updated, the only event that should
+// wake the model on a default invocation.
+function emitActionable(event) {
     process.stdout.write(JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n");
+}
+
+// Diagnostic events (connected, subscribed, still_watching, error,
+// filter_error) describe the listener's own lifecycle, not a remote
+// resource change. They go to stderr so the wrapping Monitor only fires
+// on actionable updates. With --verbose they go to stdout instead, for
+// callers that want the full event trail (debugging, log capture, etc.).
+function emitDiagnostic(event) {
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
+    (verbose ? process.stdout : process.stderr).write(line);
 }
 
 // Pick the most recently touched item in a cnvs.app-shaped snapshot.
@@ -114,7 +137,7 @@ function extractTrigger(snapshot) {
 async function connectAndListen() {
     const transport = new StreamableHTTPClientTransport(new URL(mcpUrl));
     const client = new Client(
-        { name: "mcp-listen", version: "0.2.0" },
+        { name: "mcp-listen", version: "0.3.0" },
         { capabilities: {} }
     );
 
@@ -141,28 +164,26 @@ async function connectAndListen() {
             } catch (err) {
                 // On any failure we fall through and still emit the event,
                 // just without a trigger payload — better to over-notify
-                // than to swallow an update silently. Diagnostics go to
-                // STDERR so they don't turn into Monitor notifications on
-                // non-cnvs servers where parse/read routinely fails (the
-                // SKILL.md documents the filter as a silent no-op there;
-                // stdout must stay clean to honor that contract).
-                process.stderr.write(JSON.stringify({
-                    ts: new Date().toISOString(),
+                // than to swallow an update silently. Diagnostics never
+                // reach stdout by default, so non-cnvs servers (where
+                // parse/read routinely fails) don't pollute Monitor with
+                // filter_error wake-ups.
+                emitDiagnostic({
                     event: "filter_error",
                     uri,
                     message: err?.message ?? String(err),
-                }) + "\n");
+                });
             }
         }
-        emit({ event: "resource_updated", uri, trigger });
+        emitActionable({ event: "resource_updated", uri, trigger });
     });
 
     await client.connect(transport);
-    emit({ event: "connected", mcpUrl, ignoreAuthors, ignorePrefixes });
+    emitDiagnostic({ event: "connected", mcpUrl, ignoreAuthors, ignorePrefixes });
 
     for (const uri of uris) {
         await client.subscribeResource({ uri });
-        emit({ event: "subscribed", uri });
+        emitDiagnostic({ event: "subscribed", uri });
     }
 
     // Keep the process alive. The SDK's own SSE handle does NOT always keep
@@ -173,7 +194,7 @@ async function connectAndListen() {
     return await new Promise((resolve, reject) => {
         const heartbeatMs = 120_000;
         const hb = setInterval(() => {
-            emit({ event: "still_watching" });
+            emitDiagnostic({ event: "still_watching" });
         }, heartbeatMs);
         client.onerror = (err) => {
             clearInterval(hb);
@@ -193,7 +214,7 @@ while (true) {
     try {
         await connectAndListen();
     } catch (err) {
-        emit({ event: "error", message: err?.message ?? String(err) });
+        emitDiagnostic({ event: "error", message: err?.message ?? String(err) });
         await new Promise((r) => setTimeout(r, backoffMs));
         backoffMs = Math.min(backoffMs * 2, 30_000);
         continue;

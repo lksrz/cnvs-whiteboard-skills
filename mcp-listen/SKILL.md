@@ -1,11 +1,11 @@
 ---
 name: mcp-listen
-description: GENERIC push-to-model pump for ANY Streamable-HTTP MCP server with subscriptions. Opens a session, subscribes to given resource URIs, and emits one JSON line per `notifications/resources/updated` event on stdout — designed to be wrapped by Claude Code's Monitor so every push becomes an in-chat notification (no polling). Use when a user wants to react in real time to remote state changes from an arbitrary MCP server — watched files, remote queues, task runners — even if they don't name MCP/SSE/subscriptions. For cnvs.app boards specifically, use alongside the `cnvs-whiteboard` skill (which owns read/write and delegates push here). Ships `--ignore-author` flags for self-echo filtering on cnvs-shaped payloads (`texts[] / lines[] / images[]` with `author` + `last_updated`); on other resource shapes the skill emits every event unconditionally and the caller filters downstream.
+description: Helper-only push-to-model pump for Streamable-HTTP MCP servers with `capabilities.resources.subscribe: true`. Activates ONLY when the caller — a user or another skill — explicitly hands over both an MCP server URL and one or more resource URIs to subscribe to. Spawn under Claude Code's Monitor; emits one JSON line on stdout per `notifications/resources/updated` so every actionable push becomes an in-chat notification (connection / subscription / heartbeat / diagnostic events go to stderr by default; pass `--verbose` to route them to stdout too). Pair with the `cnvs-whiteboard` skill (which delegates its push channel here) or any other skill that already knows the MCP URL + resource URI it wants to watch. Do NOT auto-activate from generic phrasing like "watch this file", "stay in the loop", or "notify me on changes" — the caller must supply the MCP coordinates. Ships `--ignore-author` / `--ignore-author-prefix` flags for self-echo filtering on cnvs-shaped payloads (`texts[] / lines[] / images[]` with `author` + `last_updated`); on other resource shapes the filter silently no-ops and the caller filters downstream.
 compatibility: Requires Node.js 18+ and npm (run `npm install` inside the skill directory once before first use).
 license: MIT
 metadata:
   author: cnvs.app
-  version: "0.2.0"
+  version: "0.3.0"
   homepage: https://cnvs.app/mcp-listen/
 ---
 
@@ -15,7 +15,18 @@ Minimal MCP notification pump. Opens a Streamable-HTTP session against an MCP se
 
 ## When to use
 
-Any time the user wants the model to "react to X on Y MCP server the moment it happens" — collaborative whiteboards (cnvs.app), file watchers, remote state changes, anything that advertises `capabilities.resources.subscribe: true`. If the server is available over Streamable HTTP (`POST /mcp` + `GET /mcp` SSE), this skill works without any server-side changes.
+**Helper-only — does not auto-activate from generic phrasing.** Trigger this skill only when the caller has already supplied two things:
+
+1. **An MCP server URL** (e.g. `https://cnvs.app/mcp`).
+2. **At least one resource URI** to subscribe to (e.g. `cnvs://board/<id>/state.json`).
+
+Typical activation paths:
+
+- **Another skill delegates push to it.** `cnvs-whiteboard` is the canonical example — it knows the MCP URL and the board's resource URI, and spawns this skill via `Monitor` to get push-to-model.
+- **The user explicitly names both coordinates** ("subscribe to `cnvs://board/abc/state.json` on `https://cnvs.app/mcp` and notify me when it changes").
+- **The user is debugging or building** an MCP server that advertises `capabilities.resources.subscribe: true` and wants to inspect live notifications.
+
+Do NOT activate on vague phrasing like "watch this file", "stay in the loop on the project", "notify me when something changes". Those map to a different surface (filesystem watchers, git hooks, polling, webhooks). This skill is for the case where MCP subscriptions are already the chosen transport and the caller has the coordinates.
 
 ## Setup (first run only)
 
@@ -30,10 +41,27 @@ Pattern for Claude Code:
 
 ```
 Monitor(
-  command: "node ~/.claude/skills/mcp-listen/scripts/listen.mjs [--ignore-author <tag>]... <mcp-url> <resource-uri> [<uri> ...]",
+  command: "node ~/.claude/skills/mcp-listen/scripts/listen.mjs [--ignore-author <tag>]... [--verbose] <mcp-url> <resource-uri> [<uri> ...]",
   description: "watching <short name> for <event>",
   persistent: true
 )
+```
+
+### Output split: actionable vs diagnostic (default since v0.3)
+
+To keep `Monitor` from waking the model on listener bookkeeping, the script segregates its output:
+
+- **stdout (actionable)** — only `resource_updated`. This is the event the model should react to: a remote resource you subscribed to changed.
+- **stderr (diagnostic)** — `connected`, `subscribed`, `still_watching` (~2 min heartbeat), `error` (transient transport error before reconnect), `filter_error` (parse/read failure during self-echo filtering on a non-cnvs payload).
+
+`Monitor` notifies on stdout lines, so by default it only fires on real updates. The full diagnostic stream is still readable with `2>&1` if you want the legacy v0.2 behavior in a single channel, or just pass `--verbose` to route everything to stdout.
+
+```
+# default: only resource_updated wakes the model
+node listen.mjs https://cnvs.app/mcp cnvs://board/<id>/state.json
+
+# verbose: every event on stdout (legacy v0.2 behavior)
+node listen.mjs --verbose https://cnvs.app/mcp cnvs://board/<id>/state.json
 ```
 
 ### Self-echo filter (opt-in, **cnvs-shaped payloads only**)
@@ -50,11 +78,13 @@ Two flags opt into filtering (cnvs-shaped payloads):
 
 On each `resources/updated` (for cnvs-shaped snapshots) the skill does one `resources/read`, picks the latest-touched item across `texts`/`lines`/`images`, and if its `author` matches any rule it suppresses the notification.
 
-Each emitted event carries a `trigger` block so the model sees *who* caused the push without a second fetch:
+Each emitted event carries a `trigger` block so the model sees *who* caused the push without a second fetch. The `connected` and `subscribed` lines below land on **stderr** since v0.3 (or stdout under `--verbose`); only the `resource_updated` line below reaches stdout by default:
 
 ```json
+// → stderr (or stdout with --verbose)
 {"ts":"...","event":"connected","mcpUrl":"https://cnvs.app/mcp","ignoreAuthors":["ai:claude"]}
 {"ts":"...","event":"subscribed","uri":"cnvs://board/<id>/state.json"}
+// → stdout (always)
 {"ts":"...","event":"resource_updated","uri":"cnvs://board/<id>/state.json",
   "trigger":{"id":"31c081fb","author":"user:658ebc2c","kind":"text","last_updated":"2026-04-14 21:08:02"}}
 ```
@@ -67,13 +97,14 @@ Writes authored by ignored tags produce no output — the model is never woken f
 
 ## Reconnection
 
-On transport error or close the script waits with exponential backoff (1 s → 30 s cap) and re-subscribes. Every reconnect emits a fresh `connected` + `subscribed` line so the chat trail stays honest about what happened.
+On transport error or close the script waits with exponential backoff (1 s → 30 s cap) and re-subscribes. Every reconnect emits a fresh `error` + `connected` + `subscribed` trio on **stderr** (or stdout with `--verbose`) so the chat trail stays honest about what happened without waking the model on each retry. Stdout stays clean; only post-reconnect `resource_updated` events reach it.
 
 ## Gotchas
 
 - **Monitor exits immediately after `connected` / `subscribed`.** Node had no active handles keeping it alive; the SDK's SSE connection alone isn't always enough. The script uses an explicit heartbeat `setInterval` as keep-alive — don't remove it.
 - **Subscribe succeeds but no `resource_updated` ever arrives.** The server is returning `204 No Content` instead of `202 Accepted` for `notifications/initialized`. The official MCP SDK opens its SSE channel only on `202`. Probe: `curl -X POST <server>/mcp -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' -v 2>&1 | grep '^< HTTP'` → should show `202`.
 - **Feedback loop: your own writes wake the listener.** You forgot `--ignore-author <your-tag>` (or the prefix variant). Add it.
+- **"It looks like nothing is happening."** Since v0.3 only `resource_updated` reaches stdout by default. `connected` / `subscribed` / `still_watching` are on stderr. To see the full lifecycle in one channel use `2>&1` in the wrapper, or pass `--verbose` to merge everything onto stdout.
 - **Works for any Streamable-HTTP MCP server with subscriptions** — not just cnvs.app. The cnvs-shaped `trigger` extraction falls through on non-board payloads and emits every event unfiltered.
 
 ## Limits
