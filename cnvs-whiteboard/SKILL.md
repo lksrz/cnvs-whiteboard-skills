@@ -16,6 +16,8 @@ Be a live AI collaborator on a cnvs.app board — discover changes, make edits, 
 
 > **If you only read one thing.** Listen for edits via MCP subscriptions (the only real-time push channel). Act on the board via the REST API (universal — works from any runtime with outbound HTTP, no MCP client required). Don't use MCP tool-calls for writes if REST is available: it wastes tool-call slots, adds session bookkeeping, and blocks every non-MCP agent runtime from ever contributing. The hybrid **MCP-listen + REST-write** loop is what this skill wires up.
 
+> **Service boundary.** cnvs.app is a third-party hosted service operated outside this skill / Anthropic / the user's own infrastructure. Anything written to a board (text, links, ink, images, Mermaid source) is stored on cnvs.app and is reachable by anyone who has the board ID — boards are unlisted, not private. Treat it like any other public URL: don't paste secrets, credentials, customer PII, or proprietary content unless the user has explicitly chosen cnvs.app as the surface for that content.
+
 ## Need a new board
 
 One call — no auth, no setup:
