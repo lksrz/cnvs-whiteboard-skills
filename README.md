@@ -72,11 +72,15 @@ Teaches an AI agent how to collaborate on a cnvs.app board in real time:
 
 Activates on any cnvs.app board reference (URL `https://cnvs.app/#<id>`, `cnvs://board/<id>/...`, or a bare board ID) or phrases like "collaborate on / draw / diagram / annotate / watch a shared whiteboard or canvas."
 
-### [`mcp-listen/`](./mcp-listen/SKILL.md) — GENERIC
+### [`mcp-listen/`](./mcp-listen/SKILL.md) — HELPER (v0.3.0)
 
-Push-to-model pump for **any** Streamable-HTTP MCP server with subscriptions. Opens a session, subscribes to the given resource URIs, and emits one JSON line per `notifications/resources/updated` event on stdout — designed to be wrapped by Claude Code's `Monitor` tool so every server push becomes an in-chat notification (no polling, no log tailing).
+Push-to-model pump for Streamable-HTTP MCP servers with `capabilities.resources.subscribe: true`. Opens a session, subscribes to the resource URIs the caller hands over, and emits one JSON line per `notifications/resources/updated` event on stdout — designed to be wrapped by Claude Code's `Monitor` tool so every server push becomes an in-chat notification (no polling, no log tailing).
 
-Not cnvs-specific. Works against file watchers, remote queues, task runners, anything exposing `resources/subscribe` over MCP. `cnvs-whiteboard` delegates its push channel here.
+**Helper-only activation since v0.3.** Triggers only when the caller — a user or another skill — has supplied **both** an MCP server URL and at least one resource URI. Does NOT auto-activate from generic phrasing like "watch this file" or "stay in the loop". `cnvs-whiteboard` is the canonical caller and delegates its push channel here.
+
+**Output split since v0.3.** Only the actionable `resource_updated` event reaches stdout by default. Connection / subscription / heartbeat / transient-error events go to stderr so a wrapping `Monitor` doesn't fire on the listener's own bookkeeping. Pass `--verbose` (or `-v`) to merge everything onto stdout for debugging or single-channel logging (legacy v0.2 behavior).
+
+**Registry status.** Intentionally *not* listed in centralised skill registries yet. Current registry pipelines (e.g. `majiayu000/claude-skill-registry-core` as of 2026-05-03) archive only `SKILL.md` + generated metadata; they do not mirror bundled `scripts/**` or `package.json`, so an entry for `mcp-listen` would publish a broken skill. It will be (re-)submitted once core registries support directory-style skill archival with bundled-file mirroring and security scanning — see PR [`majiayu000/claude-skill-registry-core#40`](https://github.com/majiayu000/claude-skill-registry-core/pull/40) for the directory-archive primitive that just landed and the open question on bundled-script scanning. Until then, install it via `curl` from `cnvs.app` (below) or `git clone` this repo.
 
 ### Install the skills
 
@@ -130,7 +134,7 @@ The cnvs.app URLs are the canonical install targets for curl-based installers; t
 - **cnvs.app `/.well-known/mcp.json`** — links both skills
 - **cnvs.app `/.well-known/mcp/server.json`** — MCP Registry entry with publisher-provided `_meta.skills[]`
 - **cnvs.app `/llms.txt`** — LLM-friendly full reference
-- **Community skill registries** — [`daymade/claude-code-skills`](https://github.com/daymade/claude-code-skills), [`majiayu000/claude-skill-registry`](https://github.com/majiayu000/claude-skill-registry) (submitted)
+- **Community skill registries** — [`daymade/claude-code-skills`](https://github.com/daymade/claude-code-skills); [`majiayu000/claude-skill-registry-core`](https://github.com/majiayu000/claude-skill-registry-core) — `cnvs-whiteboard` only (PR [#31](https://github.com/majiayu000/claude-skill-registry-core/pull/31), under review). `mcp-listen` is intentionally held back from registries until directory-style archival lands; see the *Registry status* note above.
 - **Lobehub** (used by Hermes agent) — both skills imported; MCP server submitted
 
 ## License
