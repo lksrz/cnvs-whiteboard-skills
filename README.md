@@ -130,12 +130,27 @@ The cnvs.app URLs are the canonical install targets for curl-based installers; t
 
 ## Discovery surfaces
 
+### Live
+
 - **Official MCP Registry**: `app.cnvs/whiteboard` — [browse](https://registry.modelcontextprotocol.io/v0/servers?search=cnvs)
 - **cnvs.app `/.well-known/mcp.json`** — links both skills
 - **cnvs.app `/.well-known/mcp/server.json`** — MCP Registry entry with publisher-provided `_meta.skills[]`
 - **cnvs.app `/llms.txt`** — LLM-friendly full reference
-- **Community skill registries** — [`daymade/claude-code-skills`](https://github.com/daymade/claude-code-skills); [`majiayu000/claude-skill-registry-core`](https://github.com/majiayu000/claude-skill-registry-core) — `cnvs-whiteboard` only (PR [#31](https://github.com/majiayu000/claude-skill-registry-core/pull/31), under review). `mcp-listen` is intentionally held back from registries until directory-style archival lands; see the *Registry status* note above.
+- **[`majiayu000/claude-skill-registry-core`](https://github.com/majiayu000/claude-skill-registry-core)** — `cnvs-whiteboard` listed (PR [#31](https://github.com/majiayu000/claude-skill-registry-core/pull/31) merged 2026-05-04). `mcp-listen` intentionally held back; see *Registry status* on the `mcp-listen/` section above.
 - **Lobehub** (used by Hermes agent) — both skills imported; MCP server submitted
+
+### Planned / under consideration
+
+Notes for future expansion of distribution. Not active yet — kept here so the next maintenance window doesn't have to re-discover the landscape.
+
+- **[`majiayu000/claude-skill-registry-core`](https://github.com/majiayu000/claude-skill-registry-core)** — re-submit `mcp-listen` as a separate PR now that PR [#40](https://github.com/majiayu000/claude-skill-registry-core/pull/40) (directory archives + bundled-script security scanning) is merged. `scripts/listen.mjs` is even hardcoded into their test assertions, so the pipeline already exercises our exact case.
+- **[`daymade/claude-code-skills`](https://github.com/daymade/claude-code-skills)** (vendored model) — fork, copy `cnvs-whiteboard/` and `mcp-listen/` directly into their tree (their layout already expects `scripts/`/`references/`/`assets/`), update `marketplace.json`, single PR for both skills. No bundled-files concern because the files are copied in.
+- **[`VoltAgent/awesome-agent-skills`](https://github.com/VoltAgent/awesome-agent-skills)** (curated awesome-list, 20k ⭐) — markdown link, ≤10-word description. Their CONTRIBUTING explicitly excludes brand-new skills ("give your skill time to mature and gain users before submitting"); revisit once there's documented external usage.
+- **[`sickn33/antigravity-awesome-skills`](https://github.com/sickn33/antigravity-awesome-skills)** (36k ⭐) — manual path: fork, add `skills/<name>/SKILL.md`, run `npm run validate`. Their `<!-- registry-sync: ... -->` header in README suggests automated pull from upstream registries, so a successful entry on `majiayu000/claude-skill-registry-core` *may* propagate here without a separate PR — confirm before submitting twice.
+- **[`agentskills/agentskills`](https://github.com/agentskills/agentskills)** (17.8k ⭐, the spec org behind agentskills.io) — investigate whether they accept reference implementations; `mcp-listen` as a worked example of MCP `resources/subscribe` consumption could fit there.
+- **`vercel-labs/agent-skills`** / **`vercel-labs/skills`** — almost certainly curated, but read CONTRIBUTING before ruling out.
+
+Skipped intentionally: `anthropics/skills` (curated, no community PRs); personal collections under ~100 ⭐; language-specific lists unless a relevant audience emerges.
 
 ## License
 
