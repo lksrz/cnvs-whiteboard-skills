@@ -18,6 +18,8 @@ Be a live AI collaborator on a cnvs.app board — discover changes, make edits, 
 
 > **Service boundary.** cnvs.app is a third-party hosted service operated outside this skill / Anthropic / the user's own infrastructure. Anything written to a board (text, links, ink, images, Mermaid source) is stored on cnvs.app and is reachable by anyone who has the board ID — boards are unlisted, not private. Treat it like any other public URL: don't paste secrets, credentials, customer PII, or proprietary content unless the user has explicitly chosen cnvs.app as the surface for that content.
 
+> **Access locks.** A board can OPTIONALLY be PIN-locked (6 chars, a-z0-9). Two modes: `write` (anyone reads, only key-holders write) and `all` (key required for both reads and writes). If you hit HTTP `401` with `{"code": "board_locked", "lockMode": "..."}` (REST) or JSON-RPC error `-32001` (MCP), the board is locked and you need the key. Pass it via the `X-Board-Key` header on REST and MCP POSTs, or as the `access_key` argument on individual MCP tools / `resources/read` / `resources/subscribe` params. WebSocket connections can't set custom headers, so the key rides in the `Sec-WebSocket-Protocol` subprotocol — open the socket as `new WebSocket(url, ['cnvs-key.<code>'])`; the server validates and echoes the same protocol back in the 101 response. The user owns the key — ask them for it rather than guessing. Lock management endpoints: `POST /api/boards/<id>/lock {mode}` returns the key ONCE on first lock; `POST /api/boards/<id>/unlock` clears the lock (header required); `POST /api/boards/<id>/verify-key {key}` is a pure check. There is no recovery — if every key-holder loses the key, the board becomes unreachable and gets auto-deleted after 30 days of inactivity.
+
 ## Need a new board
 
 One call — no auth, no setup:
@@ -176,6 +178,38 @@ curl -s -X POST https://cnvs.app/api/boards/<id>/texts \
 ```
 
 Every endpoint — `/texts`, `/links`, `/strokes`, `/images`, `/{kind}/{id}/move`, `DELETE /{kind}/{id}` — returns a small JSON echo with at least `id` and `author`. Full request/response schemas + all variations (mermaid content, flat point arrays, data-URL images, move semantics per kind) are in [`/llms.txt`](https://cnvs.app/llms.txt) and [`/openapi.json`](https://cnvs.app/openapi.json).
+
+### 2.3 Content markup quick reference
+
+Text node `content` supports a small Markdown-ish dialect:
+
+- `# / ## / ###` headings, `**bold**`, `*italic*`, `<u>underline</u>`
+- `- item` bullet lists (Enter continues, blank line exits — both client-side niceties)
+- `[]`, `[ ]`, `[x]` at line start become **clickable task-list checkboxes** (empty / done). Toggling on the rendered board mutates the same line in `content` (`[ ]` ↔ `[x]`); the `[]` tight form round-trips back to `[]` after two toggles. Indent with leading spaces for nested subtasks.
+- One ` ```mermaid ... ``` ` fenced block per node renders as a Mermaid diagram. Anything else is treated as plain markup.
+- Auto-linkified URLs become anchor capsules; pasting into an empty node turns the URL into a link node automatically.
+
+## Task board (kanban mode)
+
+A board is either `draw` (the default infinite canvas everything above describes) or `todo` (a kanban task board with columns and cards). The mode lives on the board snapshot as a `mode` field, and `GET /json/<id>` additionally returns `columns[]`, `tasks[]`, `lanes[]` and a shared `colWidth`.
+
+**Mode is switchable while the board is empty of *real* content** — drawings (text / strokes / images) and tasks. Empty or seeded columns DON'T count (switching to `draw` clears them), so you can flip `draw`↔`todo` freely until the first stroke/text/image or task lands. After that the server rejects a switch with HTTP `400 {code:"board_not_empty"}`. So decide up front: if the user wants a task board, set it before adding anything.
+
+Columns live in horizontal **lanes (rows)**: every column carries an integer `lane` index and a `color`, and all columns share one `colWidth` (px). A task (card) carries `name`, `description`, `due_date`, `priority` (`H`/`M`/`L`), `assignee`, `color`, `done`, its `column_id` and a float `sort`.
+
+REST endpoints (under `/api/boards/<id>`, mirrored 1:1 by the MCP tools below):
+
+- `POST /mode` — `{ mode: "draw" | "todo", template? }` → `{ ok, mode, columns }`. Setting `todo` seeds starter columns; `template` picks the set: `kanban` (To do / In progress / Done, default), `sprint` (Backlog / Sprint / Review / Done) or `bugs` (Triage / Confirmed / In progress / Fixed).
+- `POST /columns` — `{ title, lane?, color?, sort? }` to create, or `{ id, title, lane, color, sort }` to update. `DELETE /columns/<id>` deletes the column AND its tasks.
+- `POST /tasks` — `{ column_id, name, description?, due_date?(ISO 8601), priority?("H"|"M"|"L"), assignee?, color?, done?(bool, default false), sort?, id? }`. `POST /tasks/<id>/move` — `{ column_id, sort }`. `DELETE /tasks/<id>`.
+- `POST /lanes` — `{ lane, title }` names a row (empty title clears it). `POST /column-width` — `{ width }` sets the shared column width, clamped to [200, 480].
+- `GET /tasks.md` / `GET /tasks.csv` export the board as a column-grouped checklist (markdown) or one-row-per-task CSV.
+
+MCP tools: `set_board_mode` (takes the same `template`), `create_column`, `update_column`, `delete_column`, `create_task`, `create_tasks` (bulk — one call for many cards), `update_task`, `move_task`, `delete_task`, `set_lane`, `set_column_width`, `export_tasks` (`format: "markdown"|"csv"`), `list_tasks(board_id) → { mode, columns, tasks, lanes, colWidth }`, and `query_tasks(board_id, { assignee?, priority?, done?, overdue?, due_before?, due_after? })` for server-side filtering ("what's overdue / assigned to X" without pulling the whole board).
+
+The MCP resource `cnvs://board/<id>/tasks.json` carries the same `{ mode, columns, tasks, lanes, colWidth }` shape and is **subscribable** — wire it through `mcp-listen` exactly like `state.json` to react to card moves and edits in real time. A task's `content` is an opaque JSON string (e.g. `{"description":...}`) — treat it as a blob.
+
+Limits: max 200 columns (≤ 20 per row × ≤ 10 rows), 1000 tasks, 20 000 chars per task content per board (`/quotas.json` carries the live values).
 
 ## Gotchas
 
