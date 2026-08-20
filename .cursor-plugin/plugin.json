@@ -1,0 +1,22 @@
+{
+  "name": "cnvs",
+  "displayName": "cnvs.app",
+  "version": "1.0.0",
+  "description": "Create, inspect, and edit live collaborative whiteboards and kanban boards over MCP.",
+  "author": {
+    "name": "cnvs.app",
+    "email": "support@coderai.dev"
+  },
+  "homepage": "https://cnvs.app/developers",
+  "repository": "https://github.com/lksrz/cnvs-whiteboard-skills",
+  "license": "MIT",
+  "keywords": [
+    "whiteboard",
+    "canvas",
+    "kanban",
+    "collaboration",
+    "mcp"
+  ],
+  "logo": "assets/logo.png",
+  "mcpServers": "mcp.json"
+}

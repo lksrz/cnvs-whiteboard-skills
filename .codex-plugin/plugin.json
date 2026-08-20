@@ -1,0 +1,43 @@
+{
+  "name": "cnvs",
+  "version": "1.0.0",
+  "description": "Collaborate with people on live cnvs.app whiteboards and kanban boards over MCP.",
+  "author": {
+    "name": "cnvs.app",
+    "email": "support@coderai.dev",
+    "url": "https://cnvs.app"
+  },
+  "homepage": "https://cnvs.app/developers",
+  "license": "MIT",
+  "keywords": [
+    "whiteboard",
+    "canvas",
+    "kanban",
+    "collaboration",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "cnvs.app",
+    "shortDescription": "Collaborate on live whiteboards and kanban boards.",
+    "longDescription": "Create, inspect, and edit live cnvs.app whiteboards and kanban boards with human collaborators. Add text, links, images, strokes, diagrams, columns, and tasks; render visual previews; and react to updates through the hosted MCP server.",
+    "developerName": "cnvs.app",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://cnvs.app",
+    "privacyPolicyURL": "https://cnvs.app/privacy",
+    "termsOfServiceURL": "https://cnvs.app/terms",
+    "defaultPrompt": [
+      "Create a live whiteboard for this brainstorming session.",
+      "Open this cnvs.app board and summarize what is on it.",
+      "Turn these tasks into a shared kanban board."
+    ],
+    "brandColor": "#2F64D8",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
+  }
+}

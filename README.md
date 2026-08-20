@@ -12,12 +12,22 @@ Works with Claude Code, Claude Desktop, Cursor, OpenCode / OpenAI Codex, Aider (
 
 ### Capabilities
 
-- **Tools** (10): `open_board`, `get_board`, `get_preview`, `add_text`, `add_link`, `add_image`, `draw_stroke`, `move`, `erase`, `wait_for_update`. All ten have 1:1 REST mirrors at `https://cnvs.app/api/boards/<id>/…` for runtimes that can't speak MCP.
-- **Resources** (2): `cnvs://board/{id}/state.json` (full snapshot, subscribable) and `cnvs://board/{id}/preview.svg` (visual render, subscribable).
+- **Tools** (25): board creation and inspection; visual previews; text, link, image, and stroke editing; movement and deletion; live-update waits; and complete kanban column, lane, task, query, and export workflows. The exact production list is published in [`/.well-known/mcp.json`](https://cnvs.app/.well-known/mcp.json). State-changing operations also have REST mirrors under `https://cnvs.app/api/boards/<id>/…` for runtimes that cannot speak MCP.
+- **Resources** (3): `cnvs://board/{id}/state.json` (full snapshot), `cnvs://board/{id}/preview.svg` (visual render), and `cnvs://board/{id}/tasks.json` (kanban state). All three are subscribable.
 - **Subscriptions**: `resources/subscribe` supported with `notifications/resources/updated` pushed over SSE, debounced ~3 s after activity settles.
 - **Live machine-readable manifests**: [`/quotas.json`](https://cnvs.app/quotas.json), [`/openapi.json`](https://cnvs.app/openapi.json), [`/llms.txt`](https://cnvs.app/llms.txt), [`/.well-known/mcp.json`](https://cnvs.app/.well-known/mcp.json), [`/.well-known/mcp/server.json`](https://cnvs.app/.well-known/mcp/server.json).
 
 ## Installation
+
+### Codex / ChatGPT and Cursor packages
+
+This repository is the public source package for both marketplace integrations:
+
+- [`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) and [`.mcp.json`](./.mcp.json) describe the Codex / ChatGPT plugin.
+- [`.cursor-plugin/plugin.json`](./.cursor-plugin/plugin.json) and [`mcp.json`](./mcp.json) describe the Cursor plugin.
+- [`SUBMISSION.md`](./SUBMISSION.md) and [`CURSOR-MARKETPLACE.md`](./CURSOR-MARKETPLACE.md) contain the prepared listing copy, disclosures, reviewer flows, and submission checklists.
+
+Both packages connect only to the hosted production endpoint; there is no local server process or secret to configure.
 
 ### Claude Desktop / Cursor / any MCP client
 
@@ -56,6 +66,18 @@ curl "https://cnvs.app/api/boards/<id>/wait?timeout_ms=25000"
 ```
 
 Full REST reference: [`/llms.txt`](https://cnvs.app/llms.txt), [`/openapi.json`](https://cnvs.app/openapi.json).
+
+## Access model
+
+There is no account or OAuth flow. A board URL or board ID is a bearer-style access credential: anyone who knows an unlocked board URL can open it. Boards can optionally require an 8-character lowercase alphanumeric access key for writes or for both reads and writes; legacy 6-character keys remain accepted. Pass a key only through the MCP tool's `access_key` argument or the `X-Board-Key` HTTP header.
+
+Do not paste private board URLs or access keys into public issues, logs, or repositories.
+
+## Useful prompts
+
+- Create a fresh whiteboard for our brainstorming session and return its URL.
+- Open this cnvs.app board, inspect its preview, and summarize the layout.
+- Turn this list into a shared kanban board with priorities and owners.
 
 ## Skills included
 
