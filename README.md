@@ -81,7 +81,7 @@ Do not paste private board URLs or access keys into public issues, logs, or repo
 
 ## Skills included
 
-Two related Agent Skills live in this repo, published under the [agentskills.io](https://agentskills.io/specification) open standard so they work in any compatible runtime. Install them into `~/.claude/skills/` to teach the agent how to use the MCP server well (preview-before-JSON, REST-over-MCP for writes, author-tag conventions, subscription-then-react loop).
+Two related Agent Skills live in this repo, published under the [agentskills.io](https://agentskills.io/specification) open standard so they work in any compatible runtime. Both are optional and installed **by the user** (agents should only suggest them, never install them on their own). Installed into `~/.claude/skills/`, they teach the agent how to use the MCP server well (preview-before-JSON, REST-over-MCP for writes, author-tag conventions, subscription-then-react loop).
 
 ### [`cnvs-whiteboard/`](./cnvs-whiteboard/SKILL.md) — PRIMARY
 
@@ -94,32 +94,41 @@ Teaches an AI agent how to collaborate on a cnvs.app board in real time:
 
 Activates on any cnvs.app board reference (URL `https://cnvs.app/#<id>`, `cnvs://board/<id>/...`, or a bare board ID) or phrases like "collaborate on / draw / diagram / annotate / watch a shared whiteboard or canvas."
 
-### [`mcp-listen/`](./mcp-listen/SKILL.md) — HELPER (v0.3.0)
+### [`mcp-listen/`](./mcp-listen/SKILL.md) — HELPER (v0.4.0)
 
 Push-to-model pump for Streamable-HTTP MCP servers with `capabilities.resources.subscribe: true`. Opens a session, subscribes to the resource URIs the caller hands over, and emits one JSON line per `notifications/resources/updated` event on stdout — designed to be wrapped by Claude Code's `Monitor` tool so every server push becomes an in-chat notification (no polling, no log tailing).
+
+**Dependency-free since v0.4.** A single `scripts/listen.mjs` using only Node.js 18+ built-ins — no `package.json`, no `npm install`, no install scripts. Releases are served from immutable versioned URLs (`https://cnvs.app/mcp-listen/v<version>/…`) with a `SHA256SUMS` file. Zero-install alternative: the REST long-poll `GET https://cnvs.app/api/boards/<id>/wait?timeout_ms=25000` (or the `wait_for_update` MCP tool).
 
 **Helper-only activation since v0.3.** Triggers only when the caller — a user or another skill — has supplied **both** an MCP server URL and at least one resource URI. Does NOT auto-activate from generic phrasing like "watch this file" or "stay in the loop". `cnvs-whiteboard` is the canonical caller and delegates its push channel here.
 
 **Output split since v0.3.** Only the actionable `resource_updated` event reaches stdout by default. Connection / subscription / heartbeat / transient-error events go to stderr so a wrapping `Monitor` doesn't fire on the listener's own bookkeeping. Pass `--verbose` (or `-v`) to merge everything onto stdout for debugging or single-channel logging (legacy v0.2 behavior).
 
-**Registry status.** Intentionally *not* listed in centralised skill registries yet. Current registry pipelines (e.g. `majiayu000/claude-skill-registry-core` as of 2026-05-03) archive only `SKILL.md` + generated metadata; they do not mirror bundled `scripts/**` or `package.json`, so an entry for `mcp-listen` would publish a broken skill. It will be (re-)submitted once core registries support directory-style skill archival with bundled-file mirroring and security scanning — see PR [`majiayu000/claude-skill-registry-core#40`](https://github.com/majiayu000/claude-skill-registry-core/pull/40) for the directory-archive primitive that just landed and the open question on bundled-script scanning. Until then, install it via `curl` from `cnvs.app` (below) or `git clone` this repo.
+**Registry status.** Intentionally *not* listed in centralised skill registries yet. Current registry pipelines (e.g. `majiayu000/claude-skill-registry-core` as of 2026-05-03) archive only `SKILL.md` + generated metadata; they do not mirror bundled `scripts/**`, so an entry for `mcp-listen` would publish a broken skill. It will be (re-)submitted once core registries support directory-style skill archival with bundled-file mirroring and security scanning — see PR [`majiayu000/claude-skill-registry-core#40`](https://github.com/majiayu000/claude-skill-registry-core/pull/40) for the directory-archive primitive that just landed and the open question on bundled-script scanning. Until then, install it via `curl` from `cnvs.app` (below) or `git clone` this repo.
 
-### Install the skills
+### Install the skills (run these yourself)
 
 ```bash
-# cnvs-whiteboard (SKILL.md only — no deps)
+# cnvs-whiteboard (SKILL.md only — no code)
 mkdir -p ~/.claude/skills/cnvs-whiteboard && cd ~/.claude/skills/cnvs-whiteboard
-curl -O https://cnvs.app/cnvs-whiteboard/SKILL.md
+curl -fsSLO https://cnvs.app/cnvs-whiteboard/SKILL.md
 
-# mcp-listen (SKILL.md + scripts/ + npm install)
-mkdir -p ~/.claude/skills/mcp-listen && cd ~/.claude/skills/mcp-listen
-curl -O https://cnvs.app/mcp-listen/SKILL.md \
-     -O https://cnvs.app/mcp-listen/package.json \
-     --create-dirs -o scripts/listen.mjs https://cnvs.app/mcp-listen/scripts/listen.mjs
-npm install
+# mcp-listen (pinned version, no npm, Node.js 18+). Files are downloaded into a
+# staging dir and only moved into ~/.claude/skills/mcp-listen if every checksum
+# matches. On Linux replace `shasum -a 256 -c` with `sha256sum -c`.
+stage="$(mktemp -d)" && cd "$stage" && mkdir scripts \
+  && curl -fsSLO https://cnvs.app/mcp-listen/v0.4.0/SKILL.md \
+  && curl -fsSLO https://cnvs.app/mcp-listen/v0.4.0/SHA256SUMS \
+  && curl -fsSL -o scripts/listen.mjs https://cnvs.app/mcp-listen/v0.4.0/scripts/listen.mjs \
+  && shasum -a 256 -c SHA256SUMS \
+  && mkdir -p ~/.claude/skills && rm -rf ~/.claude/skills/mcp-listen \
+  && mv "$stage" ~/.claude/skills/mcp-listen && cd ~/.claude/skills/mcp-listen \
+  && node scripts/listen.mjs --version   # 0.4.0
 ```
 
-Alternatively `git clone` this repo and `cp -r .claude/skills/* ~/.claude/skills/` — the `.claude/skills/` directory contains symlinks into `cnvs-whiteboard/` and `mcp-listen/` for Claude Code's expected layout.
+Human-facing instructions with the same steps: https://cnvs.app/docs/mcp#listen.
+
+Alternatively `git clone` this repo, check `cd mcp-listen && shasum -a 256 -c SHA256SUMS`, and `cp -r .claude/skills/* ~/.claude/skills/` — the `.claude/skills/` directory contains symlinks into `cnvs-whiteboard/` and `mcp-listen/` for Claude Code's expected layout.
 
 ## Spec compliance
 
@@ -146,9 +155,9 @@ Skills are **also** served live at:
 - [`https://cnvs.app/cnvs-whiteboard/SKILL.md`](https://cnvs.app/cnvs-whiteboard/SKILL.md)
 - [`https://cnvs.app/mcp-listen/SKILL.md`](https://cnvs.app/mcp-listen/SKILL.md)
 - [`https://cnvs.app/mcp-listen/scripts/listen.mjs`](https://cnvs.app/mcp-listen/scripts/listen.mjs)
-- [`https://cnvs.app/mcp-listen/package.json`](https://cnvs.app/mcp-listen/package.json)
+- [`https://cnvs.app/mcp-listen/v0.4.0/SHA256SUMS`](https://cnvs.app/mcp-listen/v0.4.0/SHA256SUMS) — pinned release (also `SKILL.md`, `scripts/listen.mjs` under the same prefix)
 
-The cnvs.app URLs are the canonical install targets for curl-based installers; this GitHub repo is the reference for aggregators that crawl public sources (skills.sh, etc.) and for users who prefer git clone.
+This repo is a mirror of `public/` in the cnvs.app source; the versioned cnvs.app URLs are the canonical install targets; this GitHub repo is the reference for aggregators that crawl public sources (skills.sh, etc.) and for users who prefer git clone.
 
 ## Discovery surfaces
 

@@ -1,11 +1,11 @@
 ---
 name: cnvs-whiteboard
-description: PRIMARY skill for any cnvs.app board work. Collaborate on a cnvs.app whiteboard (canvas / board / drawing surface) in real time — read shared state, add/update/move/delete text, links, sticky notes, strokes, images, and Mermaid diagrams (flowcharts, sequence diagrams, class and ER diagrams, mind maps, gantt charts, concept maps, and more), and render the SVG preview when the board has drawings. Use whenever the user references a cnvs.app board (URL `https://cnvs.app/#<id>`, `cnvs://board/<id>/...`, or `/mcp` endpoint), asks to draw / sketch / diagram / flowchart / annotate / brainstorm / collaborate / edit / watch / create content on a shared whiteboard or canvas, or drops a board ID expecting the agent to act on it — even if they don't name cnvs.app, MCP, or REST. For push-to-model notifications on human edits this skill delegates to the generic `mcp-listen` skill; install both for the full loop.
+description: PRIMARY skill for any cnvs.app board work. Collaborate on a cnvs.app whiteboard (canvas / board / drawing surface) in real time — read shared state, add/update/move/delete text, links, sticky notes, strokes, images, and Mermaid diagrams (flowcharts, sequence diagrams, class and ER diagrams, mind maps, gantt charts, concept maps, and more), and render the SVG preview when the board has drawings. Use whenever the user references a cnvs.app board (URL `https://cnvs.app/#<id>`, `cnvs://board/<id>/...`, or `/mcp` endpoint), asks to draw / sketch / diagram / flowchart / annotate / brainstorm / collaborate / edit / watch / create content on a shared whiteboard or canvas, or drops a board ID expecting the agent to act on it — even if they don't name cnvs.app, MCP, or REST. For push-to-model notifications on human edits this skill delegates to the generic `mcp-listen` skill, which the USER installs (https://cnvs.app/docs/mcp#listen) — offer it, never install it yourself.
 compatibility: Requires outbound HTTPS access to https://cnvs.app. MCP subscriptions need a Streamable-HTTP MCP client (Claude Code, Claude Desktop, Cursor, OpenCode, Aider with MCP plugin, etc.). Writes work from any runtime via plain REST — no MCP client required.
 license: MIT
 metadata:
   author: cnvs.app
-  version: "1.0.0"
+  version: "1.1.0"
   homepage: https://cnvs.app/cnvs-whiteboard/
   board_url_pattern: "https://cnvs.app/#<boardId>"
 ---
@@ -31,7 +31,9 @@ curl -s -X POST https://cnvs.app/api/boards
 
 That's it. Drop the returned id into `https://cnvs.app/#<id>` to share, and into every `/api/boards/<id>/...` mutation below. Use this whenever the task asks for a fresh surface and no URL was given.
 
-Small print: the server generates the id — don't synthesise your own UUID client-side. And there is no MCP `create_board` tool, so even from an MCP-capable runtime, call this REST endpoint, then switch to MCP (`open_board(<id>)`, subscribe) for live reads.
+Building a whole board from scratch? The same endpoint accepts an optional import body — `{ content, autolayout?, lock?, author? }` — that creates the board pre-filled (texts/lines/images, or `mode:"todo"` with columns/tasks) in ONE atomic call: everything is validated first, and any invalid item aborts with a structured `400 {error:"invalid_item", kind, index, reason}` leaving nothing behind. The combined content arrays may contain at most **2550 entries**; `lanes` has at most **10 entries**, every lane title must reference a row used by a created column, and each lane index may be named **at most once** — a second `{lane: 0, …}` entry is rejected (`{error:"invalid_item", kind:"lanes", index: <the SECOND entry>, reason:"lane 0 is named twice in this import — each lane may have at most one title entry"}`) instead of collapsing last-write-wins, which would overwrite the first entry's `author`. `tasks[].done` must be a **real boolean** — `"done": "false"` is `{error:"invalid_item", kind:"tasks", index, reason:"done must be true or false (or omitted)"}`, not a card silently imported as completed; omit it or send `null` for not-done. (In practice the 5 MB request-body cap binds first on image-heavy imports.) `autolayout: true` places draw items that omit x/y; `lock: "write"|"all"` PIN-locks at create time (plaintext key returned once as `access_key`). Every item accepts its own optional `author` — an item's author is its CREATOR and is never rewritten, so restoring somebody else's board keeps the original attribution instead of stamping yours; omit it to inherit the body-level `author` (default `ai:import`). Item ids are ALWAYS server-minted and come back in `ids` (`{texts,lines,images,columns,tasks}`, index `i` ↔ `content.<kind>[i]`; `ids.columns` is empty when the columns came from the template seed, and lanes have no id). To keep anchored strokes across a restore, give a text/image a write-only `sourceId` (unique string, ≤128 chars — never stored, never the row id) and point `lines[].anchors.start.id` / `.end.id` at it: matching ids are rewritten to the minted id, unmatched ids stay verbatim and render as a free stroke end. The response's `imported` counts double as feature detection. MCP mirror: the `create_board` tool (same arguments + implementation). A valid server-to-server `X-Import-Token` selects the 10× infrastructure REST/MCP rate tier (600/10s/board; 50 creates/60s/token); it never bypasses board access locks, content, validation, or platform limits. Full schema: https://cnvs.app/llms-full.txt ("Board import"); live limits: https://cnvs.app/quotas.json.
+
+Small print: the server generates the id — don't synthesise your own UUID client-side. From an MCP-capable runtime you can use `create_board` directly; either way, follow up with `open_board(<id>)` + subscribe for live reads.
 
 ## How to use this skill
 
@@ -40,7 +42,7 @@ Each time you receive a board ID (or URL), run through this checklist:
 1. [ ] **Set your author tag.** Pick an `ai:<label>` (e.g. `ai:claude`, `ai:gpt4`, `ai:myagent`). Pass it on every mutation. It becomes immutable.
 2. [ ] **Read the current snapshot.** `GET https://cnvs.app/json/<id>` (keep the returned `ETag`).
 3. [ ] **View the SVG preview** if the board contains lines or images (see §1.4). Numbers alone won't tell you what a stroke actually depicts.
-4. [ ] **Listen for changes** (optional, push-driven): install the `mcp-listen` skill and wire `cnvs://board/<id>/state.json` through `Monitor` with `--ignore-author-prefix ai:`.
+4. [ ] **Listen for changes** (optional, push-driven): if the user has installed the `mcp-listen` skill (offer it — the user installs it per https://cnvs.app/docs/mcp#listen; never install it yourself without explicit consent), wire `cnvs://board/<id>/state.json` through `Monitor` with `--ignore-author-prefix ai:`.
 5. [ ] **React** — re-read snapshot on every push (send `If-None-Match` to skip no-op pushes), then mutate via REST.
 
 ## TL;DR flow
@@ -76,22 +78,17 @@ MCP-for-writes is legitimate but strictly slower per cycle (JSON-RPC envelope + 
 
 ## Part 1 — Listen via MCP (push-to-model)
 
-### 1.1 Install the `mcp-listen` skill
+### 1.1 The `mcp-listen` skill — offered to, and installed by, the user
 
-This skill doesn't bundle the listener itself — installation is a one-liner from its own canonical location:
+This skill doesn't bundle the listener. `mcp-listen` is an OPTIONAL, dependency-free Node.js 18+ script (no npm) that the **user** installs themselves, from pinned, checksummed URLs, following https://cnvs.app/docs/mcp#listen.
 
-```bash
-mkdir -p ~/.claude/skills/mcp-listen
-cd       ~/.claude/skills/mcp-listen
-curl -O https://cnvs.app/mcp-listen/SKILL.md \
-     -O https://cnvs.app/mcp-listen/package.json \
-     --create-dirs -o scripts/listen.mjs https://cnvs.app/mcp-listen/scripts/listen.mjs
-npm install --silent
-```
+- **Do NOT download or install it yourself** (no `curl`, no writing into the user's skills folder) unless the user explicitly asks you to. Installing code into a persistent skills folder is the user's decision.
+- If it is not installed and real-time awareness would help, **suggest it** and link https://cnvs.app/docs/mcp#listen.
+- **Zero-install fallback:** long-poll `GET https://cnvs.app/api/boards/<id>/wait?timeout_ms=25000` — blocks until the next debounced edit burst (~3 s after activity settles) or the timeout (clamped 1000–55000 ms), returns `{boardId, updated, timedOut, etag}`; on `updated:true` re-read `/json/<id>`, on `timedOut:true` just call it again. MCP mirror: the `wait_for_update` tool.
 
-No global install, no daemons. The skill lives under your user dir and only runs when Claude Code spawns it. Full details: `https://cnvs.app/mcp-listen/SKILL.md`.
+Full listener reference: `https://cnvs.app/mcp-listen/SKILL.md`.
 
-### 1.2 Wire it through Claude Code's `Monitor`
+### 1.2 Wire it through Claude Code's `Monitor` (once the user has installed it)
 
 ```
 Monitor(
@@ -203,7 +200,7 @@ REST endpoints (under `/api/boards/<id>`, mirrored 1:1 by the MCP tools below):
 - `POST /columns` — `{ title, lane?, color?, sort? }` to create, or `{ id, title, lane, color, sort }` to update. `DELETE /columns/<id>` deletes the column AND its tasks.
 - `POST /tasks` — `{ column_id, name, description?, due_date?(ISO 8601), priority?("H"|"M"|"L"), assignee?, color?, done?(bool, default false), sort?, id? }`. `POST /tasks/<id>/move` — `{ column_id, sort }`. `DELETE /tasks/<id>`.
 - `POST /lanes` — `{ lane, title }` names a row (empty title clears it). `POST /column-width` — `{ width }` sets the shared column width, clamped to [200, 480].
-- `GET /tasks.md` / `GET /tasks.csv` export the board as a column-grouped checklist (markdown) or one-row-per-task CSV.
+- `GET /tasks.md` / `GET /tasks.csv` export the board as a column-grouped checklist (markdown) or one-row-per-task CSV (header `lane,column,name,priority,assignee,due_date,done,description`; `lane` is the swimlane title, or its 1-based row number when untitled — the markdown export carries the same as a `_(lane: …)_` tag on each column heading). Both are served inline; add `?download=1` for an `attachment` disposition. Re-importing such a CSV through the app's *Open file…* reads the `lane` column back **verbatim** as the row TITLE (distinct labels in file order, one per free row; indices are re-allocated, never read from the file), so a board with untitled lanes round-trips to one whose lanes are titled `1`, `2`, `3`.
 
 MCP tools: `set_board_mode` (takes the same `template`), `create_column`, `update_column`, `delete_column`, `create_task`, `create_tasks` (bulk — one call for many cards), `update_task`, `move_task`, `delete_task`, `set_lane`, `set_column_width`, `export_tasks` (`format: "markdown"|"csv"`), `list_tasks(board_id) → { mode, columns, tasks, lanes, colWidth }`, and `query_tasks(board_id, { assignee?, priority?, done?, overdue?, due_before?, due_after? })` for server-side filtering ("what's overdue / assigned to X" without pulling the whole board).
 
@@ -218,18 +215,19 @@ These are the non-obvious facts that will trip the agent if they're not stated u
 - **Author tags are IMMUTABLE** after creation. `author = creator`, forever. A move/edit by another collaborator only advances `last_updated`. Use this for reliable self-filtering and attribution.
 - **Ink colors are a fixed named palette** (`auto` / `black` for theme-aware ink, plus `red`, `blue`, `green`, `orange`, `yellow`, `pink`, `purple`, `maroon`, `brown`, `gray`, `lightgray`, `teal`, `sage`, `sky`, `lavender`; case-insensitive). Custom hex codes sent through the API / MCP silently clamp to `auto` (`var(--text-color)`) — this keeps AI writes visible across light and dark themes. **Pass a name, not an RGB value.** (Kanban column and card title colors are the narrower `red` / `blue` / `green` set only.)
 - **Default author on REST mutations is `ai:rest`** if you don't pass `author`. To claim attribution cleanly, always pass `author: "ai:<your-name>"`.
-- **Rate limit**: 60 req / 10 s per board. REST + MCP share a Worker-isolate-local bucket; WebSockets get a separate per-board Durable-Object bucket. 429 carries `Retry-After`.
+- **Rate limits**: standard REST/MCP is 60 req/10 s/board; a valid server-to-server `X-Import-Token` selects 600/10 s/board. Board creation is 5/60 s/IP standard or 50/60 s/infrastructure token. WebSockets remain 60/10 s/board and lock/unlock/verify-key remain 5/60 s/IP. The token never bypasses board access locks or hard caps. 429 carries `Retry-After`.
+- **Field / operation caps**: author 80 chars; thumbnail 8000 bytes; text width 160–4096 px; column width 200–480 px (default 280); lane/column titles 200 chars; task name 500 chars; assignee 200 chars; recolor and batch each 500 items/ops; continued WS gesture 500 frames with 500 ms idle expiry. Parse `/quotas.json` instead of hardcoding.
 - **Per-board quotas**: 500 texts (100 k chars each), 50 images (900 kB each, 10 MB total), 2000 strokes. 413 response names the specific `kind` in its body.
 - **Debounce**: notifications aggregate bursts into one event ~3 s after activity settles. One push may cover many edits — always re-fetch the full snapshot after a trigger.
-- **CORS**: `*` on every public endpoint. No preflight surprises from browser runtimes.
+- **CORS**: `*` on every public endpoint. Public browser headers are allowed; `X-Import-Token` is intentionally excluded because it is a server-to-server credential.
 - **Validation errors** return `{code:"invalid_payload", field, reason}` with HTTP 400 — `field` names the exact offender. Parse it, don't retry blindly.
 - **Image paste caveat**: `dataUrl` must be under 900 kB and `thumbDataUrl` (if sent) must be PNG/JPEG/WebP, NOT SVG. 413 with `kind:"image_bytes_per_item"` if you exceed.
 
 ## Part 3 — Minimal end-to-end pseudocode
 
 ```
-// one-time
-install_skill("mcp-listen")
+// one-time — only if the USER has installed mcp-listen (https://cnvs.app/docs/mcp#listen);
+// otherwise loop on GET /api/boards/<id>/wait?timeout_ms=25000 instead
 MCP_LISTENER = spawn_monitor([
   "node", "~/.claude/skills/mcp-listen/scripts/listen.mjs",
   "--ignore-author-prefix", "ai:",
@@ -260,7 +258,7 @@ Always consult these before inventing endpoint shapes or limits:
 
 ## Related skills
 
-- **mcp-listen** ([install](https://cnvs.app/mcp-listen/SKILL.md)) — the push-to-model listener this skill depends on for real-time awareness. Generic: works for any Streamable-HTTP MCP server with subscriptions, not just cnvs.app.
+- **mcp-listen** ([reference](https://cnvs.app/mcp-listen/SKILL.md), [user install steps](https://cnvs.app/docs/mcp#listen)) — the optional push-to-model listener for real-time awareness; the user installs it, never the agent. Generic: works for any Streamable-HTTP MCP server with subscriptions, not just cnvs.app.
 
 ## Troubleshooting
 
